@@ -58,7 +58,6 @@ def process_relations(relations: Dict[str, List[str]], data: List[dict]) -> None
             # This is what Picard does internally. Not sure why, but I'll keep it for now.
             and relation["type"] == "performance"
         ):
-            print(relation["type"])
             if "relations" in relation["work"]:
                 process_relations(relations, relation["work"]["relations"])
 
