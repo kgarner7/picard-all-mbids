@@ -50,13 +50,19 @@ def process_relations(relations: Dict[str, List[str]], data: List[dict]) -> None
                 key = (
                     relation["type"]
                     + ":"
-                    + ":".join(item.capitalize() for item in relation["attributes"])
+                    + ":".join(attrib.capitalize() for attrib in relation["attributes"])
                 )
             else:
                 key = relation["type"]
 
-            target_type = ARTIST_REL_TYPES.get(key, key).capitalize()
-            relations[target_type].append(relation["artist"]["id"])
+            target_type = ARTIST_REL_TYPES.get(key, key)
+            target_type = target_type[0].capitalize() + target_type[1:]
+
+            id = relation["artist"]["id"]
+            target_relation = relations[target_type]
+
+            if id not in target_relation:
+                target_relation.append(id)
         elif (
             relation["target-type"] == "work"
             and "work" in relation
@@ -74,50 +80,29 @@ def add_all_mbids(tagger, metadata: "Metadata", track: dict, release: dict) -> N
             process_relations(relations, track["recording"]["relations"])
 
             for relation, ids in relations.items():
-                metadata[f"MusicBrainz {relation} Id"] = ids
+                key = f"MusicBrainz {relation} Id"
+                metadata[key] = ids
 
     if "label-info" in release:
-        label_ids = [
+        label_ids = set(
             label["label"]["id"]
             for label in release["label-info"]
             if label and "label" in label and label["label"] and label["label"]["id"]
-        ]
-        metadata["MusicBrainz Label Id"] = label_ids
+        )
+        metadata["MusicBrainz Label Id"] = list(label_ids)
 
 
 def load_custom_mbid_tags(file: File):
-    filename = encode_filename(file.filename)
+    for name in list(file.orig_metadata.keys()):
+        if name.startswith("musicbrainz "):
+            key = ":".join(item.capitalize() for item in name[12:-3].split(":"))
+            cased_name = f"MusicBrainz {key} Id"
 
-    if isinstance(file, VCommentFile):
-        vorbis = file._File(filename)
-        if vorbis.tags:
-            for name, value in vorbis.tags.items():
-                if name.startswith("musicbrainz "):
-                    data = ":".join(
-                        item.capitalize() for item in name[12:-3].split(":")
-                    )
-                    key = f"MusicBrainz {data} Id"
-                    file.metadata[key] = value
-                    file.orig_metadata[key] = value
-    elif isinstance(file, ID3File):
-        id3 = file._get_file(filename)
-        if id3.tags:
-            for frame in id3.tags.values():
-                if frame.FrameID == "TXXX":
-                    if frame.desc.startswith("MusicBrainz "):
-                        file.metadata[frame.desc] = frame.text
-                        file.orig_metadata[frame.desc] = frame.text
-    elif isinstance(file, MP4File):
-        mp4 = MP4(filename)
-        if mp4.tags:
-            for name, values in mp4.tags.items():
-                if name.startswith("----:com.apple.iTunes:MusicBrainz "):
-                    key = name[22:]
-                    if key not in file.orig_metadata:
-                        for value in values:
-                            val = value.decode("utf-8", "replace").strip("\x00")
-                            file.metadata.add(key, val)
-                            file.orig_metadata.add(key, val)
+            file.orig_metadata[cased_name] = file.orig_metadata.pop(name).split("; ")
+            file.metadata[cased_name] = file.metadata.pop(name).split("; ")
+
+            file.metadata.deleted_tags.clear()
+            file.orig_metadata.deleted_tags.clear()
 
 
 register_file_post_load_processor(load_custom_mbid_tags)
