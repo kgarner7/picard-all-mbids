@@ -24,7 +24,12 @@ from typing import Dict, List
 from collections import defaultdict
 
 from picard import log
+from picard.file import File, register_file_post_load_processor
+from picard.formats.id3 import ID3File
+from picard.formats.mp4 import MP4File, MP4
+from picard.formats.vorbis import VCommentFile
 from picard.metadata import Metadata, register_track_metadata_processor
+from picard.util import encode_filename
 
 try:
     from picard.mbjson import _ARTIST_REL_TYPES as ARTIST_REL_TYPES
@@ -75,9 +80,46 @@ def add_all_mbids(tagger, metadata: "Metadata", track: dict, release: dict) -> N
         label_ids = [
             label["label"]["id"]
             for label in release["label-info"]
-            if label and "label" in label and "id" in label["label"]
+            if label and "label" in label and label["label"] and label["id"]
         ]
         metadata["MusicBrainz Label Id"] = label_ids
 
 
+def load_custom_mbid_tags(file: File):
+    filename = encode_filename(file.filename)
+
+    if isinstance(file, VCommentFile):
+        vorbis = file._File(filename)
+        if vorbis.tags:
+            for name, value in vorbis.tags.items():
+                print(name, value)
+                if name.startswith("musicbrainz "):
+                    data = ":".join(
+                        item.capitalize() for item in name[12:-3].split(":")
+                    )
+                    key = f"MusicBrainz {data} Id"
+                    file.metadata[key] = value
+                    file.orig_metadata[key] = value
+    elif isinstance(file, ID3File):
+        id3 = file._get_file(filename)
+        if id3.tags:
+            for frame in id3.tags.values():
+                if frame.FrameID == "TXXX":
+                    if frame.desc.startswith("MusicBrainz "):
+                        file.metadata[frame.desc] = frame.text
+                        file.orig_metadata[frame.desc] = frame.text
+    elif isinstance(file, MP4File):
+        mp4 = MP4(filename)
+        if mp4.tags:
+            for name, values in mp4.tags.items():
+                if name.startswith("----:com.apple.iTunes:MusicBrainz "):
+                    key = name[22:]
+                    if key not in file.orig_metadata:
+                        for value in values:
+                            val = value.decode("utf-8", "replace").strip("\x00")
+                            file.metadata.add(key, val)
+                            file.orig_metadata.add(key, val)
+
+
+register_file_post_load_processor(load_custom_mbid_tags)
 register_track_metadata_processor(add_all_mbids)
