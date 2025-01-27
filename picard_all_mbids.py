@@ -80,7 +80,7 @@ def add_all_mbids(tagger, metadata: "Metadata", track: dict, release: dict) -> N
         label_ids = [
             label["label"]["id"]
             for label in release["label-info"]
-            if label and "label" in label and label["label"] and label["id"]
+            if label and "label" in label and label["label"] and label["label"]["id"]
         ]
         metadata["MusicBrainz Label Id"] = label_ids
 
