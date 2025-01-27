@@ -25,11 +25,7 @@ from collections import defaultdict
 
 from picard import log
 from picard.file import File, register_file_post_load_processor
-from picard.formats.id3 import ID3File
-from picard.formats.mp4 import MP4File, MP4
-from picard.formats.vorbis import VCommentFile
 from picard.metadata import Metadata, register_track_metadata_processor
-from picard.util import encode_filename
 
 try:
     from picard.mbjson import _ARTIST_REL_TYPES as ARTIST_REL_TYPES
