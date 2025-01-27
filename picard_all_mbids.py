@@ -92,7 +92,6 @@ def load_custom_mbid_tags(file: File):
         vorbis = file._File(filename)
         if vorbis.tags:
             for name, value in vorbis.tags.items():
-                print(name, value)
                 if name.startswith("musicbrainz "):
                     data = ":".join(
                         item.capitalize() for item in name[12:-3].split(":")
