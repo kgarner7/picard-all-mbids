@@ -24,7 +24,6 @@ from typing import Dict, List
 from collections import defaultdict
 
 from picard import log
-from picard.file import File, register_file_post_load_processor
 from picard.metadata import Metadata, register_track_metadata_processor
 
 try:
@@ -39,23 +38,33 @@ except:
         ARTIST_REL_TYPES = {}
 
 
+MAPPED_KEYS = {"instrument", "performer"}
+
+
 def process_relations(relations: Dict[str, List[str]], data: List[dict]) -> None:
     for relation in data:
         if relation["target-type"] == "artist" and "artist" in relation:
-            if relation["attributes"]:
-                key = (
-                    relation["type"]
-                    + ":"
-                    + ":".join(attrib.capitalize() for attrib in relation["attributes"])
-                )
-            else:
-                key = relation["type"]
+            reltype = relation["type"]
+            attributes = relation.get("attributes", [])
 
-            target_type = ARTIST_REL_TYPES.get(key, key)
-            target_type = target_type[0].capitalize() + target_type[1:]
+            if reltype == "recording":
+                key = "recording_engineer"
+            elif reltype == "vocal":
+                if attributes:
+                    key = "performer_" + attributes[0].replace(" ", "_")
+                else:
+                    key = "performer_vocals"
+            elif reltype in MAPPED_KEYS:
+                key = "performer"
+                if attributes:
+                    key += "_" + attributes[0].replace(" ", "_")
+                else:
+                    key += "_general"
+            else:
+                key = ARTIST_REL_TYPES.get(reltype, reltype).replace(" ", "_")
 
             id = relation["artist"]["id"]
-            target_relation = relations[target_type]
+            target_relation = relations[key]
 
             if id not in target_relation:
                 target_relation.append(id)
@@ -76,30 +85,21 @@ def add_all_mbids(tagger, metadata: "Metadata", track: dict, release: dict) -> N
             process_relations(relations, track["recording"]["relations"])
 
             for relation, ids in relations.items():
-                key = f"MusicBrainz {relation} Id"
+                key = f"musicbrainz_{relation}_id"
                 metadata[key] = ids
 
     if "label-info" in release:
-        label_ids = set(
-            label["label"]["id"]
-            for label in release["label-info"]
-            if label and "label" in label and label["label"] and label["label"]["id"]
-        )
-        metadata["MusicBrainz Label Id"] = list(label_ids)
+        seen_labels = set()
+        label_ids = []
+
+        for label in release["label-info"]:
+            if label and "label" in label and label["label"] and label["label"]["id"]:
+                id = label["label"]["id"]
+                if id not in seen_labels:
+                    label_ids.append(id)
+                    seen_labels.add(id)
+
+        metadata["musicbrainz_label_id"] = label_ids
 
 
-def load_custom_mbid_tags(file: File):
-    for name in list(file.orig_metadata.keys()):
-        if name.startswith("musicbrainz "):
-            key = ":".join(item.capitalize() for item in name[12:-3].split(":"))
-            cased_name = f"MusicBrainz {key} Id"
-
-            file.orig_metadata[cased_name] = file.orig_metadata.pop(name).split("; ")
-            file.metadata[cased_name] = file.metadata.pop(name).split("; ")
-
-            file.metadata.deleted_tags.clear()
-            file.orig_metadata.deleted_tags.clear()
-
-
-register_file_post_load_processor(load_custom_mbid_tags)
 register_track_metadata_processor(add_all_mbids)
