@@ -21,53 +21,85 @@ PLUGIN_LICENSE = ["MIT"]
 PLUGIN_LICENSE_URL = "https://opensource.org/license/MIT"
 
 from typing import Dict, List
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
-from picard import log
 from picard.metadata import Metadata, register_track_metadata_processor
 
-try:
-    from picard.mbjson import _ARTIST_REL_TYPES as ARTIST_REL_TYPES
-except:
-    try:
-        from picard.mbjson import _artist_rel_types as ARTIST_REL_TYPES
-    except:
-        log.warning(
-            "This version of Picard has no ARTIST_REL_TYPES. Assuming an empty object"
-        )
-        ARTIST_REL_TYPES = {}
+PERFORMER_KEY = "performer"
+
+# Taken from picard/mbjson.py (release-2.12.3, 2c1c30e6ccba886270cb49aed6d0329e114763da)
+ARTIST_REL_TYPES = {
+    "arranger": "arranger",
+    "audio": "engineer",
+    "composer": "composer",
+    "conductor": "conductor",
+    "engineer": "engineer",
+    "instrument arranger": "arranger",
+    "librettist": "lyricist",
+    "live sound": "engineer",
+    "lyricist": "lyricist",
+    # 'mastering': 'engineer',
+    "mix-DJ": "djmixer",
+    "mix": "mixer",
+    "orchestrator": "arranger",
+    "producer": "producer",
+    # "recording": "recording engineer",
+    "remixer": "remixer",
+    "sound": "engineer",
+    "audio director": "director",
+    "video director": "director",
+    "vocal arranger": "arranger",
+    "writer": "writer",
+}
+
+PERFORMER_MAP = {
+    "chorus master": "chorus master",
+    "concertmaster": "concertmaster",
+    "performing orchestra": "orchestra",
+}
 
 
-MAPPED_KEYS = {"instrument", "performer"}
+MAPPED_KEYS = {"instrument": "instrument", "performer": "performer", "vocal": "vocals"}
 
 
-def process_relations(relations: Dict[str, List[str]], data: List[dict]) -> None:
+def process_relations(
+    relations: Dict[str, OrderedDict[str, None]], data: List[dict]
+) -> None:
     for relation in data:
         if relation["target-type"] == "artist" and "artist" in relation:
             reltype = relation["type"]
             attributes = relation.get("attributes", [])
 
-            if reltype == "recording":
-                key = "recording_engineer"
-            elif reltype == "vocal":
-                if attributes:
-                    key = "performer_" + attributes[0].replace(" ", "_")
-                else:
-                    key = "performer_vocals"
-            elif reltype in MAPPED_KEYS:
-                key = "performer"
-                if attributes:
-                    key += "_" + attributes[0].replace(" ", "_")
-                else:
-                    key += "_general"
-            else:
-                key = ARTIST_REL_TYPES.get(reltype, reltype).replace(" ", "_")
-
             id = relation["artist"]["id"]
-            target_relation = relations[key]
 
-            if id not in target_relation:
-                target_relation.append(id)
+            if reltype in MAPPED_KEYS:
+                # This is a type which may have multiple attributes (roles)
+                # for the same artist. In this case, append each one in order
+                # If no special attribute, used the mapped key name
+
+                if not attributes:
+                    attributes = [MAPPED_KEYS[reltype]]
+
+                for attribute in attributes:
+                    id_role = f"{id} ({attribute})"
+
+                    if id_role not in relations[PERFORMER_KEY]:
+                        relations[PERFORMER_KEY][id_role] = None
+            elif reltype in PERFORMER_MAP:
+                # These are also of type performer, but no special attribute
+                # Still, put them in the performer key
+                mapped_name = PERFORMER_MAP.get(reltype)
+                id_role = f"{id} ({mapped_name})"
+
+                if id_role not in relations[PERFORMER_KEY]:
+                    relations[PERFORMER_KEY][id_role] = None
+            else:
+                # A standard key (hopefully). If it doesn't exist, don't
+                # include it.
+                key = ARTIST_REL_TYPES.get(reltype)
+                if key:
+                    if id not in relations[key]:
+                        relations[key][id] = None
         elif (
             relation["target-type"] == "work"
             and "work" in relation
@@ -78,20 +110,30 @@ def process_relations(relations: Dict[str, List[str]], data: List[dict]) -> None
                 process_relations(relations, relation["work"]["relations"])
 
 
-def add_all_mbids(tagger, metadata: "Metadata", track: dict, release: dict) -> None:
+def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> None:
+    # This is an OrderedDict in the event that the release AND
+    # recording have the same artist. Deduplicate there.
+    # I have no idea how likely that is, but I'm not taking chances there.
+    relations: Dict[str, Dict[str, None]] = defaultdict(OrderedDict)
+
+    # The order appears to be process release attributes first, then recording attributes
+    if "relations" in release:
+        process_relations(relations, release["relations"])
+
     if "recording" in track:
         if "relations" in track["recording"]:
-            relations: Dict[str, List[str]] = defaultdict(list)
             process_relations(relations, track["recording"]["relations"])
 
-            for relation, ids in relations.items():
-                key = f"musicbrainz_{relation}_id"
-                metadata[key] = ids
+    for relation, ids in relations.items():
+        key = f"musicbrainz_{relation}_id"
+        metadata[key] = list(ids)
 
     if "label-info" in release:
         seen_labels = set()
         label_ids = []
 
+        # Ignore duplicates, and only pick the first instance of the label
+        # as the position
         for label in release["label-info"]:
             if label and "label" in label and label["label"] and label["label"]["id"]:
                 id = label["label"]["id"]
