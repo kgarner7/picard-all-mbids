@@ -114,7 +114,7 @@ def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> 
     # This is an OrderedDict in the event that the release AND
     # recording have the same artist. Deduplicate there.
     # I have no idea how likely that is, but I'm not taking chances there.
-    relations: Dict[str, Dict[str, None]] = defaultdict(OrderedDict)
+    relations: Dict[str, OrderedDict[str, None]] = defaultdict(OrderedDict)
 
     # The order appears to be process release attributes first, then recording attributes
     if "relations" in release:
