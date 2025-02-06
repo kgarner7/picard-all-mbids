@@ -78,6 +78,10 @@ def process_relations(
                 # If no special attribute, used the mapped key name
 
                 if not attributes:
+                    if reltype == "performer":
+                        relations[PERFORMER_KEY][id] = None
+                        continue
+
                     attributes = [MAPPED_KEYS[reltype]]
 
                 for attribute in attributes:
