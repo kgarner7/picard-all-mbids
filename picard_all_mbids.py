@@ -1,7 +1,8 @@
 PLUGIN_NAME = "Add Other role MBIDs"
 PLUGIN_AUTHOR = "Kendall Garner"
 PLUGIN_DESCRIPTION = """
-This plugin is to add MBIDs for other roles (composer, remixer, label ,etc.)
+This plugin is to add MBIDs for other roles (composer, remixer, label ,etc.).
+This will also normalize performer roles so everything is in the form performer:individual role
 """
 PLUGIN_VERSION = "0.1"
 PLUGIN_API_VERSIONS = [
@@ -23,8 +24,41 @@ PLUGIN_LICENSE_URL = "https://opensource.org/license/MIT"
 from typing import Dict, List
 from collections import defaultdict, OrderedDict
 
+from picard.config import Config, get_config
 from picard.metadata import Metadata, register_track_metadata_processor
+from picard.plugin import PluginPriority
 
+try:
+    # We want to respect translation as much as possible. If Picard
+    # changes, then this needs to be fixed
+    from picard.mbjson import _translate_artist_node
+except:
+    def _translate_artist_node(artist: dict, _: "Config"):
+        return (artist["name"], artist["sort-name"])
+    
+def get_translated_name(relation: dict, config: "Config") -> str:
+    """
+    The following is to get the consistent naming that Picard 
+    for performer roles. We have to manually order these
+    properly, because Picard will by default combine 
+    multiple separate performer/instrument credits for an artist
+    into one tag (e.g., (vocals and flute)). We want 
+    individual artist (role) pairs. See _relations_to_metadata_target_type_artist
+    implementation.
+    """
+
+    use_credited_as = not config.setting['standardize_artists']
+
+    artist = relation["artist"]
+    translated_name = _translate_artist_node(artist, config)[0]
+    has_translation = (translated_name != artist["name"])
+
+    if not has_translation and use_credited_as and 'target-credit' in relation:
+        if relation['target-credit']:
+            return relation['target-credit']
+        
+    return translated_name
+    
 PERFORMER_KEY = "performer"
 
 # Taken from picard/mbjson.py (release-2.12.3, 2c1c30e6ccba886270cb49aed6d0329e114763da)
@@ -63,8 +97,25 @@ MAPPED_KEYS = {"instrument": "instrument", "performer": "performer", "vocal": "v
 
 
 def process_relations(
-    relations: Dict[str, OrderedDict[str, None]], data: List[dict]
+    relations: Dict[str, OrderedDict[str, None]], 
+    performers: Dict[str, List[str]],
+    data: List[dict], config: "Config"
 ) -> None:
+    """
+    Process a list of relations in order of their appearance, and fill in the
+    role:mbid mapping, in the order of appearance in the MusicBrainz data.
+
+    Additionally, because Picard normally maps multiple performer credits
+    to one field (e.g., "vocals and guitar"), the performer is split into
+    sub role:artist names. Great effort is done to preserve translations
+    as they are done in Picard, normally.
+    
+    Arguments:
+    - relations: a persistent mapping of roles to their mbids. mbids is an ordered dict (to be an ordered set)
+    - performers: a persistent mapping of performer subroles to artist names
+    - data: the JSON relations to be parsed. A list of "relations" (of interest, artist or work)
+    """
+
     for relation in data:
         if relation["target-type"] == "artist" and "artist" in relation:
             reltype = relation["type"]
@@ -76,10 +127,15 @@ def process_relations(
                 # This is a type which may have multiple attributes (roles)
                 # for the same artist. In this case, append each one in order
                 # If no special attribute, used the mapped key name
+                name = get_translated_name(relation, config);
+
+                performer_map = relations[PERFORMER_KEY]
 
                 if not attributes:
                     if reltype == "performer":
-                        relations[PERFORMER_KEY][id] = None
+                        if id not in performer_map:
+                            performers[""].append(name)
+                            performer_map[id] = None
                         continue
 
                     attributes = [MAPPED_KEYS[reltype]]
@@ -87,8 +143,10 @@ def process_relations(
                 for attribute in attributes:
                     id_role = f"{id} ({attribute})"
 
-                    if id_role not in relations[PERFORMER_KEY]:
-                        relations[PERFORMER_KEY][id_role] = None
+                    if id_role not in performer_map:
+                        performers[attribute].append(name)
+                        performer_map[id_role] = None
+
             elif reltype in PERFORMER_MAP:
                 # These are also of type performer, but no special attribute
                 # Still, put them in the performer key
@@ -111,7 +169,7 @@ def process_relations(
             and relation["type"] == "performance"
         ):
             if "relations" in relation["work"]:
-                process_relations(relations, relation["work"]["relations"])
+                process_relations(relations, performers, relation["work"]["relations"], config)
 
 
 def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> None:
@@ -119,20 +177,22 @@ def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> 
     # recording have the same artist. Deduplicate there.
     # I have no idea how likely that is, but I'm not taking chances there.
     relations: Dict[str, OrderedDict[str, None]] = defaultdict(OrderedDict)
+    performers: Dict[str, List[str]] = defaultdict(list)
+    config = get_config()
 
     # The order appears to be process release attributes first, then recording attributes
-    if "relations" in release:
-        process_relations(relations, release["relations"])
+    if release and "relations" in release:
+        process_relations(relations, performers, release["relations"], config)
 
     if "recording" in track:
         if "relations" in track["recording"]:
-            process_relations(relations, track["recording"]["relations"])
+            process_relations(relations, performers, track["recording"]["relations"], config)
 
     for relation, ids in relations.items():
         key = f"musicbrainz_{relation}_id"
         metadata[key] = list(ids)
 
-    if "label-info" in release:
+    if release and "label-info" in release:
         seen_labels = set()
         label_ids = []
 
@@ -147,5 +207,13 @@ def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> 
 
         metadata["musicbrainz_label_id"] = label_ids
 
+    for key in list(metadata):
+        if key.startswith("performer:") or key == "performer":
+            del metadata[key]
 
-register_track_metadata_processor(add_all_mbids)
+    for role, artists in performers.items():
+        key = f"performer:{role}" if role else "performer"
+        metadata[key] = artists
+
+
+register_track_metadata_processor(add_all_mbids, priority=PluginPriority.LOW)
