@@ -169,6 +169,8 @@ def process_relations(
                         performer_map[id_role] = None
 
             elif reltype in PERFORMER_MAP:
+                name = get_translated_name(relation, config)
+
                 # These are also of type performer, but no special attribute
                 # Still, put them in the performer key
                 mapped_name = PERFORMER_MAP.get(reltype)
@@ -176,6 +178,7 @@ def process_relations(
 
                 if id_role not in relations[PERFORMER_KEY]:
                     relations[PERFORMER_KEY][id_role] = None
+                    performers[mapped_name].append(name)
             else:
                 # A standard key (hopefully). If it doesn't exist, don't
                 # include it.
