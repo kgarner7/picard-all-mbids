@@ -148,7 +148,8 @@ def process_relations(
                         if word in PERFORMER_PREFIX:
                             attributes.remove(word)
                             prefixes.append(word)
-                else:
+
+                if not attributes:
                     if reltype == "performer":
                         if id not in performer_map:
                             performers[""].append(name)
