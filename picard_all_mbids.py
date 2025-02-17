@@ -33,32 +33,35 @@ try:
     # changes, then this needs to be fixed
     from picard.mbjson import _translate_artist_node
 except:
+
     def _translate_artist_node(artist: dict, _: "Config"):
         return (artist["name"], artist["sort-name"])
-    
+
+
 def get_translated_name(relation: dict, config: "Config") -> str:
     """
-    The following is to get the consistent naming that Picard 
+    The following is to get the consistent naming that Picard
     for performer roles. We have to manually order these
-    properly, because Picard will by default combine 
+    properly, because Picard will by default combine
     multiple separate performer/instrument credits for an artist
-    into one tag (e.g., (vocals and flute)). We want 
+    into one tag (e.g., (vocals and flute)). We want
     individual artist (role) pairs. See _relations_to_metadata_target_type_artist
     implementation.
     """
 
-    use_credited_as = not config.setting['standardize_artists']
+    use_credited_as = not config.setting["standardize_artists"]
 
     artist = relation["artist"]
     translated_name = _translate_artist_node(artist, config)[0]
-    has_translation = (translated_name != artist["name"])
+    has_translation = translated_name != artist["name"]
 
-    if not has_translation and use_credited_as and 'target-credit' in relation:
-        if relation['target-credit']:
-            return relation['target-credit']
-        
+    if not has_translation and use_credited_as and "target-credit" in relation:
+        if relation["target-credit"]:
+            return relation["target-credit"]
+
     return translated_name
-    
+
+
 PERFORMER_KEY = "performer"
 
 # Taken from picard/mbjson.py (release-2.12.3, 2c1c30e6ccba886270cb49aed6d0329e114763da)
@@ -96,10 +99,14 @@ PERFORMER_MAP = {
 MAPPED_KEYS = {"instrument": "instrument", "performer": "performer", "vocal": "vocals"}
 
 
+PERFORMER_PREFIX = {"additional", "guest", "minor", "solo"}
+
+
 def process_relations(
-    relations: Dict[str, OrderedDict[str, None]], 
+    relations: Dict[str, OrderedDict[str, None]],
     performers: Dict[str, List[str]],
-    data: List[dict], config: "Config"
+    data: List[dict],
+    config: "Config",
 ) -> None:
     """
     Process a list of relations in order of their appearance, and fill in the
@@ -109,7 +116,7 @@ def process_relations(
     to one field (e.g., "vocals and guitar"), the performer is split into
     sub role:artist names. Great effort is done to preserve translations
     as they are done in Picard, normally.
-    
+
     Arguments:
     - relations: a persistent mapping of roles to their mbids. mbids is an ordered dict (to be an ordered set)
     - performers: a persistent mapping of performer subroles to artist names
@@ -127,11 +134,21 @@ def process_relations(
                 # This is a type which may have multiple attributes (roles)
                 # for the same artist. In this case, append each one in order
                 # If no special attribute, used the mapped key name
-                name = get_translated_name(relation, config);
+                name = get_translated_name(relation, config)
 
                 performer_map = relations[PERFORMER_KEY]
 
-                if not attributes:
+                prefixes = []
+
+                if attributes:
+                    # If we have attributes, they may be augmenting the role
+                    # In this case, remove all prefix attributes from the list
+                    # and save it as a prefix to append to each key
+                    for word in attributes[:]:
+                        if word in PERFORMER_PREFIX:
+                            attributes.remove(word)
+                            prefixes.append(word)
+                else:
                     if reltype == "performer":
                         if id not in performer_map:
                             performers[""].append(name)
@@ -140,11 +157,14 @@ def process_relations(
 
                     attributes = [MAPPED_KEYS[reltype]]
 
+                prefix_string = ", ".join(prefixes) + " " if prefixes else ""
+
                 for attribute in attributes:
-                    id_role = f"{id} ({attribute})"
+                    role = prefix_string + attribute
+                    id_role = f"{id} ({role})"
 
                     if id_role not in performer_map:
-                        performers[attribute].append(name)
+                        performers[role].append(name)
                         performer_map[id_role] = None
 
             elif reltype in PERFORMER_MAP:
@@ -169,7 +189,9 @@ def process_relations(
             and relation["type"] == "performance"
         ):
             if "relations" in relation["work"]:
-                process_relations(relations, performers, relation["work"]["relations"], config)
+                process_relations(
+                    relations, performers, relation["work"]["relations"], config
+                )
 
 
 def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> None:
@@ -186,7 +208,9 @@ def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> 
 
     if "recording" in track:
         if "relations" in track["recording"]:
-            process_relations(relations, performers, track["recording"]["relations"], config)
+            process_relations(
+                relations, performers, track["recording"]["relations"], config
+            )
 
     for relation, ids in relations.items():
         key = f"musicbrainz_{relation}_id"
