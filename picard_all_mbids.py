@@ -103,7 +103,7 @@ PERFORMER_PREFIX = {"additional", "guest", "minor", "solo"}
 
 
 def process_relations(
-    relations: Dict[str, OrderedDict[str, None]],
+    relations: Dict[str, Dict[str, None]],
     performers: Dict[str, List[str]],
     data: List[dict],
     config: "Config",
@@ -173,7 +173,7 @@ def process_relations(
 
                 # These are also of type performer, but no special attribute
                 # Still, put them in the performer key
-                mapped_name = PERFORMER_MAP.get(reltype)
+                mapped_name = PERFORMER_MAP[reltype]
                 id_role = f"{id} ({mapped_name})"
 
                 if id_role not in relations[PERFORMER_KEY]:
@@ -202,7 +202,7 @@ def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> 
     # This is an OrderedDict in the event that the release AND
     # recording have the same artist. Deduplicate there.
     # I have no idea how likely that is, but I'm not taking chances there.
-    relations: Dict[str, OrderedDict[str, None]] = defaultdict(OrderedDict)
+    relations: Dict[str, Dict[str, None]] = defaultdict(OrderedDict)
     performers: Dict[str, List[str]] = defaultdict(list)
     config = get_config()
 
