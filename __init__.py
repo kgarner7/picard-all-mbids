@@ -1,41 +1,9 @@
-PLUGIN_NAME = "Add Other role MBIDs"
-PLUGIN_AUTHOR = "Kendall Garner"
-PLUGIN_DESCRIPTION = """
-This plugin is to add MBIDs for other roles (composer, remixer, label ,etc.).
-This will also normalize performer roles so everything is in the form performer:individual role
-"""
-PLUGIN_VERSION = "0.1"
-PLUGIN_API_VERSIONS = [
-    "2.2",
-    "2.3",
-    "2.4",
-    "2.5",
-    "2.6",
-    "2.7",
-    "2.8",
-    "2.9",
-    "2.10",
-    "2.11",
-    "2.12",
-]
-PLUGIN_LICENSE = ["MIT"]
-PLUGIN_LICENSE_URL = "https://opensource.org/license/MIT"
-
 from typing import Dict, List
 from collections import defaultdict, OrderedDict
 
-from picard.config import Config, get_config
-from picard.metadata import Metadata, register_track_metadata_processor
-from picard.plugin import PluginPriority
-
-try:
-    # We want to respect translation as much as possible. If Picard
-    # changes, then this needs to be fixed
-    from picard.mbjson import _translate_artist_node
-except:
-
-    def _translate_artist_node(artist: dict, _: "Config"):
-        return (artist["name"], artist["sort-name"])
+from picard.config import Config
+from picard.mbjson import _translate_artist_node
+from picard.plugin3.api import Metadata, PluginApi
 
 
 def get_translated_name(relation: dict, config: "Config") -> str:
@@ -52,7 +20,7 @@ def get_translated_name(relation: dict, config: "Config") -> str:
     use_credited_as = not config.setting["standardize_artists"]
 
     artist = relation["artist"]
-    translated_name = _translate_artist_node(artist, config)[0]
+    translated_name = _translate_artist_node(artist, config).name
     has_translation = translated_name != artist["name"]
 
     if not has_translation and use_credited_as and "target-credit" in relation:
@@ -198,13 +166,15 @@ def process_relations(
                 )
 
 
-def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> None:
+def add_all_mbids(
+    api, _tagger, metadata: "Metadata", track: dict, release: dict
+) -> None:
     # This is an OrderedDict in the event that the release AND
     # recording have the same artist. Deduplicate there.
     # I have no idea how likely that is, but I'm not taking chances there.
     relations: Dict[str, Dict[str, None]] = defaultdict(OrderedDict)
     performers: Dict[str, List[str]] = defaultdict(list)
-    config = get_config()
+    config = api.global_config
 
     # The order appears to be process release attributes first, then recording attributes
     if release and "relations" in release:
@@ -244,4 +214,6 @@ def add_all_mbids(_tagger, metadata: "Metadata", track: dict, release: dict) -> 
         metadata[key] = artists
 
 
-register_track_metadata_processor(add_all_mbids, priority=PluginPriority.LOW)
+def enable(api: PluginApi):
+    """Called when plugin is enabled."""
+    api.register_track_metadata_processor(add_all_mbids)
