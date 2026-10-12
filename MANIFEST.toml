@@ -1,0 +1,13 @@
+uuid = "f8ebcfb7-da3c-487f-b656-68a5944bfec4"
+name = "Add Other role MBIDs"
+authors = ["Kendall Garner"]
+description = """
+This plugin is to add MBIDs for other roles (composer, remixer, label ,etc.).
+..."""
+api = ['3.0']
+license = "MIT"
+license_url = "https://opensource.org/license/MIT"
+long_description = """
+This plugin is to add MBIDs for other roles (composer, remixer, label ,etc.).
+This will also normalize performer roles so everything is in the form performer:individual role
+"""

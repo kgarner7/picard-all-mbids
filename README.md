@@ -1,5 +1,7 @@
 # Picard All MBIDs
 
+**NOTICE: This only supports Picard >= 3.0. For 2.0, check the older tag**
+
 This is a plugin for Picard designed to add MBIDs for all other roles where possible (remixer, composer, label).
 It tries to use the same naming convention as the original tags.
 
