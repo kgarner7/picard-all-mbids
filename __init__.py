@@ -164,7 +164,7 @@ def add_all_mbids(
     # This is an OrderedDict in the event that the release AND
     # recording have the same artist. Deduplicate there.
     # I have no idea how likely that is, but I'm not taking chances there.
-    relations: Dict[str, Dict[str, str]] = defaultdict(OrderedDict)
+    relations: Dict[str, Dict[str, str | None]] = defaultdict(OrderedDict)
     performers: Dict[str, List[str]] = defaultdict(list)
 
     # The order appears to be process release attributes first, then recording attributes
@@ -221,7 +221,7 @@ def process_artist_credits(item: dict):
 def get_untranslated_artists_mbids(
     data: List[dict],
     missing_artist_ids: Set[str] = set(),
-) -> Tuple[Set[str], Set[str]]:
+) -> Set[str]:
     for relation in data:
         if relation["target-type"] == "artist" and "artist" in relation:
             reltype = relation["type"]
@@ -240,7 +240,7 @@ def get_untranslated_artists_mbids(
                 and reltype == "performance"
                 and "relations" in relation["work"]
             ):
-                nested = untranslated_artists(
+                nested = get_untranslated_artists_mbids(
                     relation["work"]["relations"],
                     missing_artist_ids,
                 )
