@@ -18,9 +18,9 @@ from picard.webservice import WSRequest
 
 from .ui import FETCH_ALL_ARTISTS, USE_MBZ_TAG_NAMING, register_options
 
-# Note that MBZ does one request per second limit. Add 20% extra time
+# Note that MBZ does one request per second limit. Add 50% extra time
 # To be careful not to get close
-MBZ_REQUEST_DELAY = 1.2
+MBZ_REQUEST_DELAY = 1.5
 
 PERFORMER_KEY = "performer"
 
@@ -269,8 +269,8 @@ def fetch_artist(api: "PluginApi", mbid: str, retries=5):
             )
         finally:
             elapsed = time() - now
-            if elapsed > 0:
-                sleep(1.5 - elapsed)
+            if elapsed < MBZ_REQUEST_DELAY:
+                sleep(MBZ_REQUEST_DELAY - elapsed)
 
 
 def fetch_artist_translations(
@@ -296,9 +296,7 @@ def fetch_artist_translations(
     # as it looks like complete_album_task (or `api`) is not thread-safe,
     # so the album would never finish
     for idx, mbid in enumerate(missing):
-        api.logger.debug(
-            f"Fetching artist {idx}/{len(missing)} ({mbid}) for {album.id}"
-        )
+        api.logger.info(f"Fetching artist {idx}/{len(missing)} ({mbid}) for {album.id}")
         name = fetch_artist(api, mbid)
         if name:
             ARTIST_CACHE[mbid] = name
