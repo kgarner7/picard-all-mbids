@@ -220,7 +220,7 @@ def process_artist_credits(item: dict):
 
 def get_untranslated_artists_mbids(
     data: List[dict],
-    missing_artist_ids: Set[str] = set(),
+    missing_artist_ids: Set[str],
 ) -> Set[str]:
     for relation in data:
         if relation["target-type"] == "artist" and "artist" in relation:
@@ -285,7 +285,7 @@ def fetch_artist_translations(
         for track in media["tracks"]:
             process_artist_credits(track)
 
-    missing = get_untranslated_artists_mbids(release["relations"])
+    missing = get_untranslated_artists_mbids(release["relations"], set())
 
     for media in release["media"]:
         for track in media["tracks"]:
@@ -296,7 +296,9 @@ def fetch_artist_translations(
     # as it looks like complete_album_task (or `api`) is not thread-safe,
     # so the album would never finish
     for idx, mbid in enumerate(missing):
-        api.logger.info(f"Fetching artist {idx}/{len(missing)} ({mbid}) for {album.id}")
+        api.logger.info(
+            f"Fetching artist {idx + 1}/{len(missing)} ({mbid}) for {album.id}"
+        )
         name = fetch_artist(api, mbid)
         if name:
             ARTIST_CACHE[mbid] = name
