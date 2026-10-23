@@ -3,9 +3,8 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from collections import defaultdict, OrderedDict
 from functools import partial
 from json import load
-from time import sleep, time
-from urllib.request import urlopen
 
+from picard.album_requests import TaskType
 from picard.mbjson import artist_credit_from_node
 from picard.plugin3.api import (
     Album,
@@ -14,13 +13,11 @@ from picard.plugin3.api import (
     Track,
 )
 from picard.webservice import WSRequest
+from picard.util import thread
 
 
 from .ui import FETCH_ALL_ARTISTS, USE_MBZ_TAG_NAMING, register_options
 
-# Note that MBZ does one request per second limit. Add 50% extra time
-# To be careful not to get close
-MBZ_REQUEST_DELAY = 1.5
 
 PERFORMER_KEY = "performer"
 
@@ -90,7 +87,17 @@ def process_relations(
             attributes = relation.get("attributes", [])
 
             id = relation["artist"]["id"]
-            name = ARTIST_CACHE.get(id, relation["artist"]["name"])
+
+            if id in ARTIST_CACHE:
+                name = ARTIST_CACHE[id]
+            else:
+                # If we aren't fetching all alias names, still fall back
+                # to possibly using the artist sort name where applicable
+                node = {
+                    "artist": relation["artist"],
+                    "name": relation["artist"]["name"],
+                }
+                name = artist_credit_from_node([node]).names[0]
 
             if reltype in MAPPED_KEYS:
                 # This is a type which may have multiple attributes (roles)
@@ -158,9 +165,6 @@ def add_all_mbids(
     api: "PluginApi", tagger: "Track", metadata: "Metadata", track: dict, release: dict
 ) -> None:
 
-    if not api.plugin_config[FETCH_ALL_ARTISTS]:
-        return
-
     # This is an OrderedDict in the event that the release AND
     # recording have the same artist. Deduplicate there.
     # I have no idea how likely that is, but I'm not taking chances there.
@@ -223,54 +227,66 @@ def get_untranslated_artists_mbids(
     missing_artist_ids: Set[str],
 ) -> Set[str]:
     for relation in data:
+        reltype = relation["type"]
+
         if relation["target-type"] == "artist" and "artist" in relation:
-            reltype = relation["type"]
             id = relation["artist"]["id"]
 
-            if reltype in MAPPED_KEYS or reltype in PERFORMER_MAP:
+            if (
+                reltype in MAPPED_KEYS
+                or reltype in PERFORMER_MAP
+                or reltype in ARTIST_REL_TYPES
+            ):
                 if id in missing_artist_ids:
                     continue
 
                 if id not in ARTIST_CACHE:
                     missing_artist_ids.add(id)
-            elif (
-                relation["target-type"] == "work"
-                and "work" in relation
-                # This is what Picard does internally. Not sure why, but I'll keep it for now.
-                and reltype == "performance"
-                and "relations" in relation["work"]
-            ):
-                nested = get_untranslated_artists_mbids(
-                    relation["work"]["relations"],
-                    missing_artist_ids,
-                )
+
+        elif (
+            relation["target-type"] == "work"
+            and "work" in relation
+            # This is what Picard does internally. Not sure why, but I'll keep it for now.
+            and reltype == "performance"
+            and "relations" in relation["work"]
+        ):
+            nested = get_untranslated_artists_mbids(
+                relation["work"]["relations"],
+                missing_artist_ids,
+            )
 
     return missing_artist_ids
 
 
-def fetch_artist(api: "PluginApi", mbid: str, retries=5):
-    """
-    This implementation is terrible, but
-    """
-    url = api.mb_api.url_from_path(f"/artist/{mbid}")
-    path = url.toString() + "?fmt=json&inc=aliases"
+def process_artist(
+    api: "PluginApi",
+    album: "Album",
+    idx: int,
+    total: int,
+    mbid: str,
+    artist,
+    http,
+    error,
+):
+    try:
+        api.tagger.window.set_statusbar_message(
+            f"Procesed artist {idx + 1} / {total} of {album.id}"
+        )
 
-    for attempt in range(retries):
-        now = time()
-        try:
-            with urlopen(path) as r:
-                artist = load(r)
+        if error:
+            api.logger.error(f"Failed to retrieve artist {http.errorstring()}")
+            return
 
-            payload = [{"artist": artist, "name": artist["name"]}]
-            return artist_credit_from_node(payload).names[0]
-        except BaseException as e:
-            api.logger.exception(
-                f"Failed to fetch artist aliases, attempt={attempt}", exc_info=e
-            )
-        finally:
-            elapsed = time() - now
-            if elapsed < MBZ_REQUEST_DELAY:
-                sleep(MBZ_REQUEST_DELAY - elapsed)
+        payload = [{"artist": artist, "name": artist["name"]}]
+        name = artist_credit_from_node(payload).names[0]
+        ARTIST_CACHE[artist["id"]] = name
+    finally:
+        api.complete_album_task(album, mbid)
+
+        # Workaround for PICARD-3513. Basically, implement the same behavior if the fix is not in place, gated over the presence of the internal function
+        if not hasattr(album, "try_finalize_loading"):
+            if not album.loaded and not album.has_critical_tasks():
+                thread.to_main(album._finalize_loading, False)
 
 
 def fetch_artist_translations(
@@ -291,62 +307,25 @@ def fetch_artist_translations(
         for track in media["tracks"]:
             get_untranslated_artists_mbids(track["recording"]["relations"], missing)
 
-    # The following code is NOT good, as it blocks the UI until it is done
-    # But, the proper code (background requests) doesn't work right now (3.0.2)
-    # as it looks like complete_album_task (or `api`) is not thread-safe,
-    # so the album would never finish
+    total_missing = len(missing)
+
     for idx, mbid in enumerate(missing):
-        api.logger.info(
-            f"Fetching artist {idx + 1}/{len(missing)} ({mbid}) for {album.id}"
+
+        def fetch_artist_factory():
+            return api.mb_api._get_by_id(
+                "artist",
+                mbid,
+                handler=partial(process_artist, api, album, idx, total_missing, mbid),
+                inc=["aliases"],
+            )
+
+        api.add_album_task(
+            album,
+            mbid,
+            f"finalize artist {mbid}",
+            request_factory=fetch_artist_factory,
+            blocking=True,
         )
-        name = fetch_artist(api, mbid)
-        if name:
-            ARTIST_CACHE[mbid] = name
-
-    # NOTE: the following code **WILL NOT WORK** because `api` is not threadsafe
-    # Attempting to call `complete_album_task` in another thread will in fact still block the UI
-
-    # for mbid in missing:
-    #     print("registering task", album, mbid)
-
-    #     def fetch_artist_factory():
-    #         return api.mb_api._get_by_id(
-    #             "artist",
-    #             mbid,
-    #             handler=partial(process_artist, api, album, mbid),
-    #             inc=["aliases"],
-    #         )
-
-    #     print(mbid)
-
-    #     api.add_album_task(
-    #         album,
-    #         mbid,
-    #         "finalize artist",
-    #         request_factory=fetch_artist_factory,
-    #         timeout=5,
-    #     )
-
-
-# def process_artist(
-#     api: "PluginApi",
-#     album: "Album",
-#     mbid: str,
-#     artist,
-#     http,
-#     error,
-# ):
-#     try:
-#         if error:
-#             print("error", http.errorString())
-#             return
-
-#         payload = [{"artist": artist, "name": artist["name"]}]
-#         name = artist_credit_from_node(payload).names[0]
-#         ARTIST_CACHE[artist["id"]] = name
-#     finally:
-#         api.complete_album_task(album, mbid)
-#         semaphore.release()
 
 
 def enable(api: "PluginApi"):
