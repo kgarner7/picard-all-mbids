@@ -2,9 +2,9 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from collections import defaultdict, OrderedDict
 from functools import partial
-from json import load
+from json import load, loads
 
-from picard.album_requests import TaskType
+
 from picard.mbjson import artist_credit_from_node
 from picard.plugin3.api import (
     Album,
@@ -12,12 +12,13 @@ from picard.plugin3.api import (
     PluginApi,
     Track,
 )
-from picard.webservice import WSRequest
 from picard.util import thread
 
+from PyQt6.QtCore import QStandardPaths
 
-from .ui import FETCH_ALL_ARTISTS, USE_MBZ_TAG_NAMING, register_options
-
+from .consts import *
+from .db import DB
+from .ui import register_options
 
 PERFORMER_KEY = "performer"
 
@@ -216,9 +217,14 @@ def add_all_mbids(
 
 
 def process_artist_credits(item: dict):
+    should_cache = DB.is_db_enabled()
+
     for artist in item["artist-credit"]:
         id = artist["artist"]["id"]
         if id not in ARTIST_CACHE:
+            if should_cache:
+                DB.cache_artist_info(id, artist)
+
             ARTIST_CACHE[id] = artist_credit_from_node([artist]).names[0]
 
 
@@ -270,16 +276,19 @@ def process_artist(
 ):
     try:
         api.tagger.window.set_statusbar_message(
-            f"Procesed artist {idx + 1} / {total} of {album.id}"
+            f"Processed artist {idx + 1} / {total} of {album.id}"
         )
 
         if error:
             api.logger.error(f"Failed to retrieve artist {http.errorstring()}")
             return
 
-        payload = [{"artist": artist, "name": artist["name"]}]
-        name = artist_credit_from_node(payload).names[0]
+        payload = {"artist": artist, "name": artist["name"]}
+        name = artist_credit_from_node([payload]).names[0]
         ARTIST_CACHE[artist["id"]] = name
+
+        if DB.is_db_enabled():
+            DB.cache_artist_info(mbid, payload)
     finally:
         api.complete_album_task(album, mbid)
 
@@ -330,6 +339,14 @@ def fetch_artist_translations(
 
 def enable(api: "PluginApi"):
     """Called when plugin is enabled."""
+    register_options(api)
+
+    DB.init_singleton(api)
+    cached_items = DB.initialize_db(return_items=True)
+
+    if cached_items:
+        for id, body in cached_items:
+            ARTIST_CACHE[id] = artist_credit_from_node([loads(body)]).names[0]
+
     api.register_album_metadata_processor(fetch_artist_translations)
     api.register_track_metadata_processor(add_all_mbids, priority=-100)
-    register_options(api)
