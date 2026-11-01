@@ -9,10 +9,11 @@ from picard.plugin3.api import PluginApi
 
 from .consts import *
 
-EXPIRY_TIME_SEC = 30 * 24 * 60 * 60
+DAY_IN_SECONDS = 24 * 60 * 60
 
 
 class DB:
+    api: PluginApi | None = None
     conn: Connection | None = None
     lock = Lock()
 
@@ -48,10 +49,13 @@ class DB:
                         """
                     )
 
-                    c.execute(
-                        "DELETE FROM artists WHERE updated < ?",
-                        (time() - EXPIRY_TIME_SEC,),
-                    )
+                    if cls.api.plugin_config[CACHE_DAYS] > 0:
+                        expiry_time = cls.api.plugin_config[CACHE_DAYS] * DAY_IN_SECONDS
+
+                        c.execute(
+                            "DELETE FROM artists WHERE updated < ?",
+                            (time() - expiry_time,),
+                        )
 
                 if return_items:
                     with cls.conn as c:

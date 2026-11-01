@@ -49,6 +49,16 @@ class PluginOptionPage(OptionsPage):
 
         self.layout.addLayout(self.file_group)
 
+        self.cache_time_group = QHBoxLayout()
+        self.cache_days_label = QLabel("Days until entry is stale (0 for no expiry):")
+        self.cache_days_input = QSpinBox()
+        self.cache_days_input.setMinimum(0)
+
+        self.cache_time_group.addWidget(self.cache_days_label)
+        self.cache_time_group.addWidget(self.cache_days_input)
+
+        self.layout.addLayout(self.cache_time_group)
+
         self.fetch_all_artists.stateChanged.connect(self._toggle_fetch_artists)
         self.cache_artist_info.stateChanged.connect(self._toggle_fetch_artists)
 
@@ -59,6 +69,7 @@ class PluginOptionPage(OptionsPage):
         self.fetch_all_artists.setChecked(self.api.plugin_config[FETCH_ALL_ARTISTS])
         self.cache_artist_info.setChecked(self.api.plugin_config[CACHE_ARTIST_INFO])
         self.cache_file.setText(self.api.plugin_config[CACHE_FILE])
+        self.cache_days_input.setValue(self.api.plugin_config[CACHE_DAYS])
 
     def save(self):
         self.api.plugin_config[USE_MBZ_TAG_NAMING] = (
@@ -67,6 +78,7 @@ class PluginOptionPage(OptionsPage):
         self.api.plugin_config[FETCH_ALL_ARTISTS] = self.fetch_all_artists.isChecked()
         self.api.plugin_config[CACHE_ARTIST_INFO] = self.cache_artist_info.isChecked()
         self.api.plugin_config[CACHE_FILE] = self.cache_file.text()
+        self.api.plugin_config[CACHE_DAYS] = self.cache_days_input.value()
 
     def _toggle_fetch_artists(self):
         can_fetch = self.fetch_all_artists.isChecked()
@@ -74,6 +86,7 @@ class PluginOptionPage(OptionsPage):
 
         self.cache_artist_info.setEnabled(can_fetch)
         self.cache_file.setEnabled(can_cache and can_fetch)
+        self.cache_days_input.setEnabled(can_cache and can_fetch)
 
         DB.initialize_db()
 
@@ -98,4 +111,5 @@ def register_options(api: "PluginApi"):
     api.plugin_config.register_option(
         CACHE_FILE, default_cache_dir, title="Path to artist cache database"
     )
+    api.plugin_config.register_option(CACHE_DAYS, 30, title="Days to cache artist info")
     api.register_options_page(PluginOptionPage)
