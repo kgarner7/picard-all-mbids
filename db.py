@@ -36,7 +36,7 @@ class DB:
                 base_dir = dirname(file)
                 makedirs(base_dir, exist_ok=True)
 
-                cls.conn = connect(file)
+                cls.conn = connect(file, check_same_thread=False)
 
                 with cls.conn as c:
                     c.execute(
@@ -60,7 +60,9 @@ class DB:
                 if return_items:
                     with cls.conn as c:
                         cursor = c.execute("SELECT mbid, contents FROM artists")
-                        return cursor.fetchall()
+                        results = cursor.fetchall()
+                        cursor.close()
+                        return results
 
                 return None
 

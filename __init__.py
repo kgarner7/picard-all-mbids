@@ -58,15 +58,30 @@ PERFORMER_PREFIX = {"additional", "guest", "minor", "solo"}
 
 MAPPED_KEYS = {"instrument": "instrument", "performer": "performer", "vocal": "vocals"}
 
+# For whatever reason, forward/reverse have different meanings per key.
+# This plugin intends for forward to mean recording A has <relation> recording B
+# and for backward to mean that recording A is a <relation> of recoding B
+# For relations where this is not the case, the first field will be True signifying
+# that it is inverted
+RECORDING_RELATION_KEYS: Dict[str, Tuple[bool, str]] = {
+    "a cappella": (False, "acappella"),
+    "instrumental": (False, "instrumental"),
+    "karaoke": (False, "karaoke"),
+    "remix": (True, "remix"),
+    "samples material": (True, "samples"),
+}
+
 
 ARTIST_CACHE: Dict[str, str] = {}
 
 
 def process_relations(
+    api: "PluginApi",
     relations: Dict[str, Dict[str, Optional[str]]],
     performers: Dict[str, List[str]],
     data: List[dict],
 ) -> None:
+    api.mb_api.get_release_by_id
     """
     Process a list of relations in order of their appearance, and fill in the
     role:mbid mapping, in the order of appearance in the MusicBrainz data.
@@ -83,8 +98,9 @@ def process_relations(
     """
 
     for relation in data:
+        reltype = relation["type"]
+
         if relation["target-type"] == "artist" and "artist" in relation:
-            reltype = relation["type"]
             attributes = relation.get("attributes", [])
 
             id = relation["artist"]["id"]
@@ -156,10 +172,29 @@ def process_relations(
             relation["target-type"] == "work"
             and "work" in relation
             # This is what Picard does internally. Not sure why, but I'll keep it for now.
-            and relation["type"] == "performance"
+            and reltype == "performance"
         ):
             if "relations" in relation["work"]:
-                process_relations(relations, performers, relation["work"]["relations"])
+                process_relations(
+                    api, relations, performers, relation["work"]["relations"]
+                )
+        elif (
+            relation["target-type"] == "recording"
+            and "recording" in relation
+            and reltype in RECORDING_RELATION_KEYS
+        ):
+            is_inverted, rel_key = RECORDING_RELATION_KEYS[reltype]
+            if is_inverted:
+                is_forward = relation["direction"] == "backward"
+            else:
+                is_forward = relation["direction"] == "forward"
+
+            if (is_forward and api.plugin_config[FORWARD_RECORDING_RELS]) or (
+                not is_forward and api.plugin_config[BACKWARD_RECORDING_RELS]
+            ):
+
+                key = f"has{rel_key}" if is_forward else f"{rel_key}of"
+                relations[key][relation["recording"]["id"]] = None
 
 
 def add_all_mbids(
@@ -174,21 +209,23 @@ def add_all_mbids(
 
     # The order appears to be process release attributes first, then recording attributes
     if release and "relations" in release:
-        process_relations(relations, performers, release["relations"])
+        process_relations(api, relations, performers, release["relations"])
 
     if "recording" in track and "relations" in track["recording"]:
-        process_relations(relations, performers, track["recording"]["relations"])
+        process_relations(api, relations, performers, track["recording"]["relations"])
 
     sep = "" if api.plugin_config[USE_MBZ_TAG_NAMING] else "_"
 
     for relation, ids in relations.items():
         key = f"musicbrainz_{relation}{sep}id"
-        metadata[key] = list(ids)
+        mbids = list(ids)
+        metadata[key] = mbids
 
-        # Override the existing relation credits with translated name (if available)
-        # or just the roles in order. Note that we group all performer roles under one item
-        # mbz_performer*id rather than individual roles
-        if not relation.startswith("performer"):
+        # Some items return "None" for the value; this is for fields which are processed in a special way
+        # Currently this is:
+        #   - Performers: they are grouped under one field in the performers block
+        #   - Recordings (forward and backwards): only the mbid is included
+        if ids[mbids[0]] != None:
             metadata[relation] = list(ids.values())
 
     if release and "label-info" in release:

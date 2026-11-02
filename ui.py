@@ -28,16 +28,25 @@ class PluginOptionPage(OptionsPage):
         self.use_picard_tag_format = QCheckBox(
             "Use Picard standard tag naming for extended tags (picard_labelid instead of picard_label_id)"
         )
+        self.forward_recording_rels = QCheckBox(
+            "Enable forward recording relations (e.g., recording A has instrumental recordings B and C)"
+        )
+        self.backward_recording_rels = QCheckBox(
+            "Enable backward recording relations (e.g., recording B is an instrumental version of recording A)"
+        )
         self.fetch_all_artists = QCheckBox(
             "Translate all artist roles. This will likely result in much longer processing time as additional artists have to be fetched to get translated names"
         )
         self.cache_artist_info = QCheckBox("Cache artist info")
 
         self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         self.layout.addWidget(self.use_picard_tag_format)
+        self.layout.addWidget(self.forward_recording_rels)
+        self.layout.addWidget(self.backward_recording_rels)
         self.layout.addWidget(self.fetch_all_artists)
         self.layout.addWidget(self.cache_artist_info)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.file_group = QHBoxLayout()
 
@@ -66,6 +75,12 @@ class PluginOptionPage(OptionsPage):
         self.use_picard_tag_format.setChecked(
             self.api.plugin_config[USE_MBZ_TAG_NAMING]
         )
+        self.forward_recording_rels.setChecked(
+            self.api.plugin_config[FORWARD_RECORDING_RELS]
+        )
+        self.backward_recording_rels.setChecked(
+            self.api.plugin_config[BACKWARD_RECORDING_RELS]
+        )
         self.fetch_all_artists.setChecked(self.api.plugin_config[FETCH_ALL_ARTISTS])
         self.cache_artist_info.setChecked(self.api.plugin_config[CACHE_ARTIST_INFO])
         self.cache_file.setText(self.api.plugin_config[CACHE_FILE])
@@ -74,6 +89,12 @@ class PluginOptionPage(OptionsPage):
     def save(self):
         self.api.plugin_config[USE_MBZ_TAG_NAMING] = (
             self.use_picard_tag_format.isChecked()
+        )
+        self.api.plugin_config[FORWARD_RECORDING_RELS] = (
+            self.forward_recording_rels.isChecked()
+        )
+        self.api.plugin_config[BACKWARD_RECORDING_RELS] = (
+            self.backward_recording_rels.isChecked()
         )
         self.api.plugin_config[FETCH_ALL_ARTISTS] = self.fetch_all_artists.isChecked()
         self.api.plugin_config[CACHE_ARTIST_INFO] = self.cache_artist_info.isChecked()
@@ -100,16 +121,11 @@ def register_options(api: "PluginApi"):
     api.plugin_config.register_option(
         USE_MBZ_TAG_NAMING,
         False,
-        title="Use Picard standard tag naming for extended tags",
     )
-    api.plugin_config.register_option(
-        FETCH_ALL_ARTISTS, False, title="Fetch all artist names from MusicBrainz"
-    )
-    api.plugin_config.register_option(
-        CACHE_ARTIST_INFO, True, title="Cache artist info"
-    )
-    api.plugin_config.register_option(
-        CACHE_FILE, default_cache_dir, title="Path to artist cache database"
-    )
-    api.plugin_config.register_option(CACHE_DAYS, 30, title="Days to cache artist info")
+    api.plugin_config.register_option(FORWARD_RECORDING_RELS, False)
+    api.plugin_config.register_option(BACKWARD_RECORDING_RELS, False)
+    api.plugin_config.register_option(FETCH_ALL_ARTISTS, False)
+    api.plugin_config.register_option(CACHE_ARTIST_INFO, True)
+    api.plugin_config.register_option(CACHE_FILE, default_cache_dir)
+    api.plugin_config.register_option(CACHE_DAYS, 30)
     api.register_options_page(PluginOptionPage)
