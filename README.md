@@ -7,7 +7,7 @@ It tries to use the same naming convention as the original tags.
 
 ## Mappings
 
-Standard Picard (see `picard/mbjson.py` / `ARTIST_REL_TYPES` for the list) tags are mapped to `musicbrainz_role_id`.
+Standard Picard (see `picard/mbjson.py` / `ARTIST_REL_TYPES` for the list) tags are mapped to `musicbrainz_role_id` (default), or `musicbrainz_roleid` if `Use Picard standard tag naming` is enabled in the plugins setting page.
 
 Performers (instrument, vocalist, other roles) are mapped to `musicbrainz_performer_id` as a multi-valued field.
 Each item in the tag is in the form `artist-mbid (role)`, where `role` is **one** role.
@@ -15,3 +15,8 @@ Each item in the tag is in the form `artist-mbid (role)`, where `role` is **one*
 For example, if an artist `A` has two roles, `piano` and `guitar`, you would have `musicbrainz_performer_id` be `A (piano); A (guitar)`.
 
 In addition, ensure that performers are standardized in the form "artist (role 1); artist(role 2); artist(role 3);", rather than "artist (role 1, role 2, role 3")
+
+Additional role `mastering` is included now, and if `Enable forward recording` or `Enable backward recording` is enabled, then `musicbrainz_has<relation>_id` or `musicbrainz_relation<of>` is added as well.
+
+Finally, if you wish to have standard artist names, you can enable `Translate all artist roles` (and are recommended to also `Cache artist info`) to fetch translations for all artist names.
+Please note, this will add considerable time to album fetches that have many artists.
